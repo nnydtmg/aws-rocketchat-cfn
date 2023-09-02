@@ -6,7 +6,7 @@ Parameters:
   CertificateArn:
     Type: String
     Description: ACM certificate ARN.
-    Default: "arn:aws:acm:ap-northeast-1:308072786789:certificate/c12f3335-e686-4947-8006-ad4ed1b2d195"
+    Default: "arn:aws:acm:<region-name>:<accountid>:certificate/<random-string>"
     MaxLength: 128
     MinLength: 10
 #　============== リソース ==============
