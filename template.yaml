@@ -1,0 +1,388 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: for practice
+#　============== パラメータ ==============
+#　パラメータ
+Parameters: 
+  CertificateArn:
+    Type: String
+    Description: ACM certificate ARN.
+    Default: "arn:aws:acm:ap-northeast-1:308072786789:certificate/c12f3335-e686-4947-8006-ad4ed1b2d195"
+    MaxLength: 128
+    MinLength: 10
+#　============== リソース ==============
+Resources:
+#　-------------- IAM --------------
+#　ロール
+  MySSMMICRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      RoleName: !Sub ${AWS::StackName}-MySSMMICRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+#　インスタンスプロファイル
+  MyInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref MySSMMICRole
+#　-------------- VPC --------------
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      InstanceTenancy: default
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-MyVPC
+#-------------- インターネットゲートウェイ --------------
+#  IGW
+  MyIGW:
+    Type: AWS::EC2::InternetGateway
+    Properties: 
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-MyIGW
+#  アタッチメント
+  MyIGWAttach:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !Ref MyIGW
+      VpcId: !Ref MyVPC
+#　-------------- VPCエンドポイント --------------
+  MyVPCESSM:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref MyVPCESG
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ssm
+      SubnetIds:
+      - !Ref MyPriSN1
+      - !Ref MyPriSN2
+      VpcEndpointType: Interface
+      VpcId: !Ref MyVPC
+
+  MyVPCESSMMessages:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref MyVPCESG
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ssmmessages
+      SubnetIds:
+      - !Ref MyPriSN1
+      - !Ref MyPriSN2
+      VpcEndpointType: Interface
+      VpcId: !Ref MyVPC 
+
+  MyVPCEEC2Messages:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      PrivateDnsEnabled: true
+      SecurityGroupIds:
+        - !Ref MyVPCESG
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ec2messages
+      SubnetIds:
+      - !Ref MyPriSN1
+      - !Ref MyPriSN2
+      VpcEndpointType: Interface
+      VpcId: !Ref MyVPC
+
+  MyVPCES3:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      RouteTableIds:
+        - !Ref MyPriRT1
+        - !Ref MyPriRT2
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      VpcEndpointType: Gateway
+      VpcId: !Ref MyVPC
+#　-------------- EIP --------------
+  MyNATGW1EIP: 
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc 
+#　-------------- サブネット --------------
+#　パブリック
+  MyPubSN1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.0.0/24
+      VpcId: !Ref MyVPC
+      AvailabilityZone: !Select [ 0, !GetAZs ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-MyPubSN1
+
+  MyPubSN2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.2.0/24
+      VpcId: !Ref MyVPC
+      AvailabilityZone: !Select [ 1, !GetAZs ]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-MyPubSN2
+
+#　プライベート
+  MyPriSN1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.1.0/24
+      VpcId: !Ref MyVPC
+      AvailabilityZone: !Select [ 0, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-MyPriSN1
+
+  MyPriSN2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.3.0/24
+      VpcId: !Ref MyVPC
+      AvailabilityZone: !Select [ 1, !GetAZs ]
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-MyPriSN2
+#　-------------- ルートテーブル --------------
+#  ルートテーブル
+  MyPubRT:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-MyPubRT
+
+  MyPriRT1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-MyPriRT1
+
+  MyPriRT2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-MyPriRT2
+#  ルート
+  MyPubRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref MyPubRT
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyIGW
+
+  MyPriRoute1: 
+    Type: AWS::EC2::Route
+    Properties: 
+      RouteTableId: !Ref MyPriRT1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref MyNATGW1
+
+  MyPriRoute2: 
+    Type: AWS::EC2::Route
+    Properties: 
+      RouteTableId: !Ref MyPriRT2 
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref MyNATGW1
+#  アソシエーション
+  MyPubSN1Assoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref MyPubSN1
+      RouteTableId: !Ref MyPubRT
+
+  MyPubSN2Assoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref MyPubSN2
+      RouteTableId: !Ref MyPubRT
+
+  MyPrivateSubne1Assoc: 
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      SubnetId: !Ref MyPriSN1
+      RouteTableId: !Ref MyPriRT1
+
+  MyPriSN2Assoc: 
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      SubnetId: !Ref MyPriSN2
+      RouteTableId: !Ref MyPriRT2
+#　-------------- NATゲートウェイ --------------
+  MyNATGW1: 
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt MyNATGW1EIP.AllocationId 
+      SubnetId: !Ref MyPubSN1
+      Tags: 
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-MyNATGW1
+#　-------------- ALB --------------
+#　ALB
+  MyALB: 
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties: 
+      Name: !Sub ${AWS::StackName}-MyALB
+      Scheme: internet-facing
+      Type: application
+      LoadBalancerAttributes: 
+        - Key: deletion_protection.enabled
+          Value: false
+        - Key: idle_timeout.timeout_seconds
+          Value: 40
+      SecurityGroups:
+        - !Ref MyALBSG
+      Subnets: 
+        - !Ref MyPubSN1
+        - !Ref MyPubSN2
+#　リスナー
+  MyALBListener: 
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      DefaultActions:
+        - TargetGroupArn: !Ref MyTG
+          Type: forward
+      LoadBalancerArn: !Ref MyALB
+#　ターゲットグループ
+  MyTG: 
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      VpcId: !Ref MyVPC
+      Name: !Sub ${AWS::StackName}-MyTG
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Port: 3000
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckPort: 3000
+      HealthyThresholdCount: 5
+      UnhealthyThresholdCount: 2
+      HealthCheckTimeoutSeconds: 5
+      HealthCheckIntervalSeconds: 30
+      IpAddressType: ipv4
+      Matcher: 
+        HttpCode: 200
+      TargetType: instance
+      Targets: 
+        - Id: !Ref MyEC2no1
+          Port: 3000
+      Tags: 
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-MyTG
+#　-------------- EC2インスタンス --------------
+  MyEC2no1: 
+    Type: AWS::EC2::Instance
+    Properties: 
+      ImageId: ami-03f4fa076d2981b45
+      InstanceType: t2.small
+      IamInstanceProfile: !Ref MyInstanceProfile
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: 40
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: false
+          DeviceIndex: 0
+          SubnetId: !Ref MyPriSN1
+          GroupSet:
+            - !Ref MyEC2SG
+      UserData: !Base64 |
+        #!/bin/bash
+        snap install rocketchat-server --channel=4.x/stable
+        systemctl status snap.rocketchat-server.rocketchat-server.service
+        systemctl status snap.rocketchat-server.rocketchat-mongo.service
+      Tags:
+          - Key: Name
+            Value: !Sub ${AWS::StackName}-MyEC2no1
+#　-------------- セキュリティグループ --------------
+  MyVPCESG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref MyVPC
+      GroupDescription: for VPCE for Session Manager.
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !Ref MyEC2SG
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443  
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-MyVPCESG
+
+  MyALBSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref MyVPC
+      GroupName: security group for ALB
+      GroupDescription: Allow HTTP access from Internet Only for your Global IP.
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-MyALBSG
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Allow inbound HTTP access from all IPv4 addresses.
+
+  MyALBEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      Description: Allow all protocol for MyEC2SG.
+      DestinationSecurityGroupId: !GetAtt MyEC2SG.GroupId
+      GroupId: !GetAtt MyALBSG.GroupId
+      IpProtocol: -1
+
+  MyEC2SG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref MyVPC
+      GroupName: security group for EC2
+      GroupDescription: Allow HTTP access from MyALB, and Allow all protocol for all IPv4 addresses.
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-MyEC2SG
+
+  MyEC2Ingress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Allow HTTP access from MyALB
+      FromPort: 3000
+      ToPort: 3000
+      IpProtocol: tcp
+      SourceSecurityGroupId: !GetAtt MyALBSG.GroupId
+      GroupId: !GetAtt MyEC2SG.GroupId
+#　============== アウトプット ==============
+Outputs:
+  MyALBDomain:
+    Value: !GetAtt MyALB.DNSName
+    Export: 
+      Name: !Sub ${AWS::StackName}-MyALBDNSName
